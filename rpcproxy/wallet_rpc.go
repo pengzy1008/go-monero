@@ -21,7 +21,7 @@ type Destination struct {
 	Address string
 }
 
-func NewWalletRPCProxy(rpc_ip string, rpc_port int16, rpc_user string, rpc_password string) WalletRPCProxy {
+func CreateWalletRPCProxy(rpc_ip string, rpc_port int16, rpc_user string, rpc_password string) WalletRPCProxy {
 	proxy := WalletRPCProxy{
 		rpc_ip:       rpc_ip,
 		rpc_port:     rpc_port,

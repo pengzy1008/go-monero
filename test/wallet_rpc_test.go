@@ -6,7 +6,7 @@ import (
 )
 
 func Test_WalletRPCProxy_GetBalance(t *testing.T) {
-	wallet_proxy := rpcproxy.NewWalletRPCProxy(
+	wallet_proxy := rpcproxy.CreateWalletRPCProxy(
 		"127.0.0.1",
 		28088,
 		"pengzy1008",
@@ -20,7 +20,7 @@ func Test_WalletRPCProxy_GetBalance(t *testing.T) {
 }
 
 func Test_WalletRPCProxy_Transfer(t *testing.T) {
-	wallet_proxy := rpcproxy.NewWalletRPCProxy(
+	wallet_proxy := rpcproxy.CreateWalletRPCProxy(
 		"127.0.0.1",
 		28088,
 		"pengzy1008",

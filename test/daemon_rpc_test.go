@@ -6,7 +6,7 @@ import (
 )
 
 func Test_DaemonRPCProxy_GetBlockCount(t *testing.T) {
-	daemon_proxy := rpcproxy.NewDaemonRPCProxy(
+	daemon_proxy := rpcproxy.CreateDaemonRPCProxy(
 		"43.138.89.105",
 		28081,
 		"pengzy1008",
@@ -20,7 +20,7 @@ func Test_DaemonRPCProxy_GetBlockCount(t *testing.T) {
 }
 
 func Test_DaemonRPCProxy_GetHeight(t *testing.T) {
-	daemon_proxy := rpcproxy.NewDaemonRPCProxy(
+	daemon_proxy := rpcproxy.CreateDaemonRPCProxy(
 		"43.138.89.105",
 		28081,
 		"pengzy1008",

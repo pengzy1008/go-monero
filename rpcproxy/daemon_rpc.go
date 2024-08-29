@@ -15,7 +15,7 @@ type DaemonRPCProxy struct {
 }
 
 // 创建DaemonRPC代理，所有的和节点有关的RPC调用都通过它来完成
-func NewDaemonRPCProxy(rpc_ip string, rpc_port int16, rpc_user string, rpc_password string) DaemonRPCProxy {
+func CreateDaemonRPCProxy(rpc_ip string, rpc_port int16, rpc_user string, rpc_password string) DaemonRPCProxy {
 	proxy := DaemonRPCProxy{
 		rpc_ip:       rpc_ip,
 		rpc_port:     rpc_port,
