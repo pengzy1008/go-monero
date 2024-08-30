@@ -34,7 +34,7 @@ func CreateWalletRPCProxy(rpc_ip string, rpc_port int16, rpc_user string, rpc_pa
 }
 
 // get_balance: 除第一个参数外，其余参数均可以设置为nil或false
-func (proxy WalletRPCProxy) GetBalance(
+func (proxy *WalletRPCProxy) GetBalance(
 	account_index uint, address_indices []uint, all_acounts bool, strict bool) (balance int64, unlocked_balance int64) {
 
 	rpc_method := "get_balance"
@@ -57,7 +57,7 @@ func (proxy WalletRPCProxy) GetBalance(
 	return -1, -1
 }
 
-func (proxy WalletRPCProxy) Transfer(
+func (proxy *WalletRPCProxy) Transfer(
 	destinations []map[string]interface{}, account_index uint, subaddr_indices []uint, get_tx_key bool,
 	do_not_relay bool, get_tx_hex bool, get_tx_metadata bool) map[string]interface{} {
 

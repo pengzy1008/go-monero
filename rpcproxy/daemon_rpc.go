@@ -34,7 +34,7 @@ func CreateDaemonRPCProxy(rpc_ip string, rpc_port int16, rpc_user string, rpc_pa
 */
 
 // get_block_height
-func (proxy DaemonRPCProxy) GetBlockCount() int {
+func (proxy *DaemonRPCProxy) GetBlockCount() int {
 	rpc_method := "get_block_count"
 	params := map[string]interface{}{}
 	response := JsonMethodRequest(proxy.json_rpc_url, rpc_method, params, proxy.rpc_user, proxy.rpc_password)
@@ -53,7 +53,7 @@ func (proxy DaemonRPCProxy) GetBlockCount() int {
 */
 
 // get_height
-func (proxy DaemonRPCProxy) GetHeight() int {
+func (proxy *DaemonRPCProxy) GetHeight() int {
 	rpc_method := "get_height"
 	params := map[string]interface{}{}
 	response := OtherMethodRequest(proxy.other_rpc_url, rpc_method, params, proxy.rpc_user, proxy.rpc_password)
