@@ -12,12 +12,13 @@ import (
 
 // 虚拟的门罗币节点
 type Node struct {
-	my_port  uint16
-	peer_id  uint64
-	listener net.Listener
+	my_port    uint32
+	network_id []byte
+	peer_id    uint64
+	listener   net.Listener
 }
 
-func CreateNode(listen_port uint16) Node {
+func CreateNode(listen_port uint32) Node {
 	max := new(big.Int).Lsh(big.NewInt(1), 64)
 	random_num, err := rand.Int(rand.Reader, max)
 	if err != nil {
@@ -25,8 +26,9 @@ func CreateNode(listen_port uint16) Node {
 		return Node{}
 	}
 	node := Node{
-		my_port: listen_port,
-		peer_id: random_num.Uint64(),
+		my_port:    listen_port,
+		network_id: network_id_testnet,
+		peer_id:    random_num.Uint64(),
 	}
 	return node
 }
@@ -77,6 +79,40 @@ func (node *Node) handleConnectionRequest(conn *net.Conn) {
 		if !res {
 			return
 		}
-		fmt.Println("deserialize finished! msg.ptr =", msg.ptr)
+
+		// 处理消息
+		if msg.command == 1001 && msg.expect_response {
+			response_msg := node.CreateHandshakeResponse()
+			data_to_send := append(response_msg.header_bytes, response_msg.payload_bytes...)
+			_, err := (*conn).Write(data_to_send)
+			if err != nil {
+				log.Println("Error sending data:", err)
+				return
+			} else {
+				fmt.Println("Handshake response sent!")
+			}
+		}
 	}
+}
+
+/*
+	==============================
+	Create Monero Protocol Message
+	==============================
+*/
+
+func (node *Node) CreateHandshakeRequest() LevinProtocolMessage {
+	msg := LevinProtocolMessage{}
+	payload_map := msg.writeHandshakeRequestPayload(node.my_port, node.network_id, node.peer_id)
+	msg.writePayload(payload_map)
+	msg.writeHeader(1001, uint64(len(msg.payload_bytes)), true)
+	return msg
+}
+
+func (node *Node) CreateHandshakeResponse() LevinProtocolMessage {
+	msg := LevinProtocolMessage{}
+	payload_map := msg.writeHandshakeResponsePayload(node.my_port, node.network_id, node.peer_id, nil)
+	msg.writePayload(payload_map)
+	msg.writeHeader(1001, uint64(len(msg.payload_bytes)), false)
+	return msg
 }
