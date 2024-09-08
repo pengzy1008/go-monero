@@ -340,7 +340,7 @@ func (msg *LevinProtocolMessage) writeHeader(message_type uint32, payload_length
 
 	// 对消息头部的序列化
 	// 1. 添加Signature
-	msg.header_bytes = binary.LittleEndian.AppendUint64(msg.header_bytes, msg.signature)
+	msg.header_bytes = binary.BigEndian.AppendUint64(msg.header_bytes, msg.signature)
 	// 2. 添加Length
 	msg.header_bytes = binary.LittleEndian.AppendUint64(msg.header_bytes, msg.length)
 	// 3. 添加E.Response
@@ -430,7 +430,8 @@ func (msg *LevinProtocolMessage) write(data interface{}) {
 	case int8:
 		msg.payload_bytes = append(msg.payload_bytes, serializeTypeInt8, uint8(data))
 	case string:
-		msg.payload_bytes = append(msg.payload_bytes, serializeTypeString, uint8(len(data)))
+		msg.payload_bytes = append(msg.payload_bytes, serializeTypeString)
+		msg.setKeyNum(uint64(len(data)))
 		msg.payload_bytes = append(msg.payload_bytes, []byte(data)...)
 	case map[string]interface{}:
 		msg.writeSectionEntry(data)
