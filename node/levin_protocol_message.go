@@ -77,6 +77,10 @@ type LevinProtocolMessage struct {
 	payload map[string]interface{}
 }
 
+const commandHandshake = 1001
+const commandTimedSync = 1002
+const commandPingPong = 1003
+
 /*
 ===============
 
@@ -499,5 +503,15 @@ func (msg *LevinProtocolMessage) writeHandshakeResponsePayload(my_port uint32, n
 	payload_data["top_version"] = byte(1)
 	data["payload_data"] = payload_data
 
+	return data
+}
+
+// Ping消息没有payload
+
+// Pong消息有payload
+func (msg *LevinProtocolMessage) writePongResponsePayload(peer_id uint64) map[string]interface{} {
+	data := make(map[string]interface{})
+	data["peer_id"] = peer_id
+	data["status"] = string([]byte{0x4f, 0x4b})
 	return data
 }
