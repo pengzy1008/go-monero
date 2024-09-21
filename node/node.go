@@ -132,7 +132,7 @@ func (node *Node) handleIncomingConnection(conn *net.Conn) {
 		// 处理消息
 		if msg.command == commandHandshake {
 			if msg.expect_response {
-				response_msg := node.CreateHandshakeResponse()
+				response_msg := node.CreateHandshakeResponse(nil)
 				data_to_send := append(response_msg.header_bytes, response_msg.payload_bytes...)
 				_, err := (*conn).Write(data_to_send)
 				if err != nil {
@@ -142,19 +142,39 @@ func (node *Node) handleIncomingConnection(conn *net.Conn) {
 					fmt.Println("Handshake response sent!")
 				}
 			} else {
-				fmt.Println("Receive Handshake reponse!")
+				fmt.Println("Receive Handshake response!")
 			}
 			continue
 		}
-		if msg.command == commandPingPong && msg.expect_response {
-			response_msg := node.CreatePongResponse()
-			data_to_send := append(response_msg.header_bytes, response_msg.payload_bytes...)
-			_, err := (*conn).Write(data_to_send)
-			if err != nil {
-				log.Println("Error sending data:", err)
-				return
+		if msg.command == commandPingPong {
+			if msg.expect_response {
+				response_msg := node.CreatePongResponse()
+				data_to_send := append(response_msg.header_bytes, response_msg.payload_bytes...)
+				_, err := (*conn).Write(data_to_send)
+				if err != nil {
+					log.Println("Error sending data:", err)
+					return
+				} else {
+					fmt.Println("Pong response sent!")
+				}
 			} else {
-				fmt.Println("Pong response sent!")
+				fmt.Println("Receive Pong response")
+			}
+			continue
+		}
+		if msg.command == commandTimedSync {
+			if msg.expect_response {
+				response_msg := node.CreateTimedSyncResponse(generateRamdomPeerlist(250))
+				data_to_send := append(response_msg.header_bytes, response_msg.payload_bytes...)
+				_, err := (*conn).Write(data_to_send)
+				if err != nil {
+					log.Println("Error sending data:", err)
+					return
+				} else {
+					fmt.Println("Timed Sync response sent!")
+				}
+			} else {
+				fmt.Println("Receive Timed Sync response")
 			}
 			continue
 		}
@@ -219,17 +239,34 @@ func (node *Node) CreateHandshakeRequest() LevinProtocolMessage {
 	return msg
 }
 
-func (node *Node) CreateHandshakeResponse() LevinProtocolMessage {
+func (node *Node) CreateHandshakeResponse(peerlist []PeerlistEntry) LevinProtocolMessage {
 	msg := LevinProtocolMessage{}
-	payload_map := msg.writeHandshakeResponsePayload(node.my_port, node.network_id, node.peer_id, nil)
+	payload_map := msg.writeHandshakeResponsePayload(node.my_port, node.network_id, node.peer_id, peerlist)
 	msg.writePayload(payload_map)
 	msg.writeHeader(commandHandshake, uint64(len(msg.payload_bytes)), false)
+	return msg
+}
+
+func (node *Node) CreateTimedSyncRequest() LevinProtocolMessage {
+	msg := LevinProtocolMessage{}
+	payload_map := msg.writeTimedSyncRequestPayload(node.network_id)
+	msg.writePayload(payload_map)
+	msg.writeHeader(commandTimedSync, uint64(len(msg.payload_bytes)), true)
+	return msg
+}
+
+func (node *Node) CreateTimedSyncResponse(peerlist []PeerlistEntry) LevinProtocolMessage {
+	msg := LevinProtocolMessage{}
+	payload_map := msg.writeTimedSyncResponsePayload(node.my_port, node.network_id, node.peer_id, peerlist)
+	msg.writePayload(payload_map)
+	msg.writeHeader(commandTimedSync, uint64(len(msg.payload_bytes)), false)
 	return msg
 }
 
 func (node *Node) CreatePingRequest() LevinProtocolMessage {
 	msg := LevinProtocolMessage{}
 	msg.writeHeader(commandPingPong, 0, true)
+	// Ping Request msg has no payload
 	return msg
 }
 
@@ -239,4 +276,21 @@ func (node *Node) CreatePongResponse() LevinProtocolMessage {
 	msg.writePayload(payload_map)
 	msg.writeHeader(commandPingPong, uint64(len(msg.payload_bytes)), false)
 	return msg
+}
+
+func generateRamdomPeerlist(num_of_peer int) []PeerlistEntry {
+	if num_of_peer > 250 {
+		num_of_peer = 250
+	}
+	peerlist := make([]PeerlistEntry, num_of_peer)
+	max := new(big.Int).Lsh(big.NewInt(1), 64)
+	for i := 0; i < num_of_peer; i++ {
+		random_num, _ := rand.Int(rand.Reader, max)
+		peerlist[i].ip = uint32(random_num.Uint64())
+		random_num, _ = rand.Int(rand.Reader, max)
+		peerlist[i].port = uint16(random_num.Uint64())
+		random_num, _ = rand.Int(rand.Reader, max)
+		peerlist[i].peer_id = random_num.Uint64()
+	}
+	return peerlist
 }

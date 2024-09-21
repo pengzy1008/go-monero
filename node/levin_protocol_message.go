@@ -77,6 +77,12 @@ type LevinProtocolMessage struct {
 	payload map[string]interface{}
 }
 
+type PeerlistEntry struct {
+	ip      uint32
+	port    uint16
+	peer_id uint64
+}
+
 const commandHandshake = 1001
 const commandTimedSync = 1002
 const commandPingPong = 1003
@@ -477,7 +483,7 @@ func (msg *LevinProtocolMessage) writeHandshakeRequestPayload(my_port uint32, ne
 	return data
 }
 
-func (msg *LevinProtocolMessage) writeHandshakeResponsePayload(my_port uint32, network_id []byte, peer_id uint64, peerlist []interface{}) map[string]interface{} {
+func (msg *LevinProtocolMessage) writeHandshakeResponsePayload(my_port uint32, network_id []byte, peer_id uint64, peerlist []PeerlistEntry) map[string]interface{} {
 	var genesis_hash []byte
 	if bytes.Equal(network_id, network_id_mainnet) {
 		genesis_hash = genesis_hash_mainnet
@@ -486,7 +492,86 @@ func (msg *LevinProtocolMessage) writeHandshakeResponsePayload(my_port uint32, n
 	}
 	data := make(map[string]interface{})
 	// local_peerlist_new
-	data["local_peerlist_new"] = peerlist
+	local_peerlist_new := []interface{}{}
+	for _, peer_entry := range peerlist {
+		peer := make(map[string]interface{})
+		adr := make(map[string]interface{})
+		addr := make(map[string]interface{})
+		addr["m_ip"] = peer_entry.ip
+		addr["m_port"] = peer_entry.port
+		peer_type := uint8(1)
+		adr["addr"] = addr
+		adr["type"] = peer_type
+		peer["adr"] = adr
+		peer["id"] = peer_entry.peer_id
+		local_peerlist_new = append(local_peerlist_new, peer)
+	}
+	data["local_peerlist_new"] = local_peerlist_new
+	// node_data
+	node_data := make(map[string]interface{})
+	node_data["my_port"] = my_port
+	node_data["network_id"] = string(network_id)
+	node_data["peer_id"] = peer_id
+	node_data["support_flags"] = p2pSupportFlags
+	data["node_data"] = node_data
+	// payload_data
+	payload_data := make(map[string]interface{})
+	payload_data["cumulative_difficulty"] = uint64(0)
+	payload_data["cumulative_difficulty_top64"] = uint64(0)
+	payload_data["current_height"] = uint64(0)
+	payload_data["top_id"] = string(genesis_hash)
+	payload_data["top_version"] = byte(1)
+	data["payload_data"] = payload_data
+
+	return data
+}
+
+// Timed Sync 请求
+func (msg *LevinProtocolMessage) writeTimedSyncRequestPayload(network_id []byte) map[string]interface{} {
+	var genesis_hash []byte
+	if bytes.Equal(network_id, network_id_mainnet) {
+		genesis_hash = genesis_hash_mainnet
+	} else if bytes.Equal(network_id, network_id_testnet) {
+		genesis_hash = genesis_hash_testnet
+	}
+	data := make(map[string]interface{})
+	// payload_data
+	payload_data := make(map[string]interface{})
+	payload_data["cumulative_difficulty"] = uint64(0)
+	payload_data["cumulative_difficulty_top64"] = uint64(0)
+	payload_data["current_height"] = uint64(0)
+	payload_data["top_id"] = string(genesis_hash)
+	payload_data["top_version"] = byte(1)
+	data["payload_data"] = payload_data
+	return data
+}
+
+// Timed Sync 响应
+func (msg *LevinProtocolMessage) writeTimedSyncResponsePayload(my_port uint32, network_id []byte, peer_id uint64, peerlist []PeerlistEntry) map[string]interface{} {
+	var genesis_hash []byte
+	if bytes.Equal(network_id, network_id_mainnet) {
+		genesis_hash = genesis_hash_mainnet
+	} else if bytes.Equal(network_id, network_id_testnet) {
+		genesis_hash = genesis_hash_testnet
+	}
+	data := make(map[string]interface{})
+	// local_peerlist_new
+	// local_peerlist_new
+	local_peerlist_new := []interface{}{}
+	for _, peer_entry := range peerlist {
+		peer := make(map[string]interface{})
+		adr := make(map[string]interface{})
+		addr := make(map[string]interface{})
+		addr["m_ip"] = peer_entry.ip
+		addr["m_port"] = peer_entry.port
+		peer_type := uint8(1)
+		adr["addr"] = addr
+		adr["type"] = peer_type
+		peer["adr"] = adr
+		peer["id"] = peer_entry.peer_id
+		local_peerlist_new = append(local_peerlist_new, peer)
+	}
+	data["local_peerlist_new"] = local_peerlist_new
 	// node_data
 	node_data := make(map[string]interface{})
 	node_data["my_port"] = my_port
