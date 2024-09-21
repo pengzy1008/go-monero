@@ -3,6 +3,7 @@ package node
 import (
 	"crypto/rand"
 	"fmt"
+	"gomonero/levin"
 	"log"
 	"math/big"
 	"net"
@@ -31,11 +32,11 @@ func CreateNode(network_type string, listen_port uint32) Node {
 	var network_id []byte
 	switch network_type {
 	case "mainnet":
-		network_id = network_id_mainnet
+		network_id = levin.NetworkIdMainnet
 	case "testnet":
-		network_id = network_id_testnet
+		network_id = levin.NetworkIdTestnet
 	default:
-		network_id = network_id_mainnet
+		network_id = levin.NetworkIdMainnet
 	}
 	node := Node{
 		my_port:    listen_port,
@@ -114,26 +115,19 @@ func (node *Node) handleIncomingConnection(conn *net.Conn) {
 	// fmt.Println("Accept incoming connection from " + (*conn).RemoteAddr().String())
 
 	for {
-		// 读消息的header数据 33字节
-		msg := LevinProtocolMessage{
-			payload: make(map[string]interface{}),
-		}
-		res := msg.readHeader(conn)
-		if !res {
-			return
-		}
-
-		// 读消息的payload data，消息的反序列化
-		res = msg.readPayload(conn)
+		// 读消息
+		msg := levin.LevinProtocolMessage{}
+		res := msg.ReadBuffer(conn)
 		if !res {
 			return
 		}
 
 		// 处理消息
-		if msg.command == commandHandshake {
-			if msg.expect_response {
-				response_msg := node.CreateHandshakeResponse(nil)
-				data_to_send := append(response_msg.header_bytes, response_msg.payload_bytes...)
+		if msg.GetCommand() == levin.CommandHandshake {
+			if msg.GetExpectResponse() {
+				response_msg := levin.LevinProtocolMessage{}
+				response_msg.CreateHandshakeResponse(node.my_port, node.network_id, node.peer_id, nil)
+				data_to_send := append(response_msg.HeaderBytes(), response_msg.PayloadBytes()...)
 				_, err := (*conn).Write(data_to_send)
 				if err != nil {
 					log.Println("Error sending data:", err)
@@ -146,10 +140,11 @@ func (node *Node) handleIncomingConnection(conn *net.Conn) {
 			}
 			continue
 		}
-		if msg.command == commandPingPong {
-			if msg.expect_response {
-				response_msg := node.CreatePongResponse()
-				data_to_send := append(response_msg.header_bytes, response_msg.payload_bytes...)
+		if msg.GetCommand() == levin.CommandPingPong {
+			if msg.GetExpectResponse() {
+				response_msg := levin.LevinProtocolMessage{}
+				response_msg.CreatePongResponse(node.peer_id)
+				data_to_send := append(response_msg.HeaderBytes(), response_msg.PayloadBytes()...)
 				_, err := (*conn).Write(data_to_send)
 				if err != nil {
 					log.Println("Error sending data:", err)
@@ -162,10 +157,11 @@ func (node *Node) handleIncomingConnection(conn *net.Conn) {
 			}
 			continue
 		}
-		if msg.command == commandTimedSync {
-			if msg.expect_response {
-				response_msg := node.CreateTimedSyncResponse(generateRamdomPeerlist(250))
-				data_to_send := append(response_msg.header_bytes, response_msg.payload_bytes...)
+		if msg.GetCommand() == levin.CommandTimedSync {
+			if msg.GetExpectResponse() {
+				response_msg := levin.LevinProtocolMessage{}
+				response_msg.CreateTimedSyncResponse(node.my_port, node.network_id, node.peer_id, generateRamdomPeerlist(250))
+				data_to_send := append(response_msg.HeaderBytes(), response_msg.PayloadBytes()...)
 				_, err := (*conn).Write(data_to_send)
 				if err != nil {
 					log.Println("Error sending data:", err)
@@ -192,8 +188,9 @@ func (node *Node) setOutgoingConnection(target_ip string, target_port uint16) {
 	defer conn.Close()
 	// fmt.Printf("Successfully connect to target %s\n", address)
 	// 发送握手请求
-	request_msg := node.CreateHandshakeRequest()
-	data_to_send := append(request_msg.header_bytes, request_msg.payload_bytes...)
+	request_msg := levin.LevinProtocolMessage{}
+	request_msg.CreateHandshakeRequest(node.my_port, node.network_id, node.peer_id)
+	data_to_send := append(request_msg.HeaderBytes(), request_msg.PayloadBytes()...)
 	_, err = conn.Write(data_to_send)
 	if err != nil {
 		log.Println("Error sending data:", err)
@@ -203,94 +200,40 @@ func (node *Node) setOutgoingConnection(target_ip string, target_port uint16) {
 	}
 	// 循环接收对端的响应
 	for {
-		// 读消息的header数据 33字节
-		msg := LevinProtocolMessage{
-			payload: make(map[string]interface{}),
-		}
-		res := msg.readHeader(&conn)
-		if !res {
-			return
-		}
-
-		// 读消息的payload data，消息的反序列化
-		res = msg.readPayload(&conn)
+		// 读消息
+		msg := levin.LevinProtocolMessage{}
+		res := msg.ReadBuffer(&conn)
 		if !res {
 			return
 		}
 
 		// 处理Handshake响应消息
-		if msg.command == commandHandshake && !msg.expect_response {
+		if msg.GetCommand() == levin.CommandHandshake && !msg.GetExpectResponse() {
 			return
 		}
 	}
 }
 
 /*
-	==============================
-	Create Monero Protocol Message
-	==============================
+=============
+
+	Tools
+
+=============
 */
-
-func (node *Node) CreateHandshakeRequest() LevinProtocolMessage {
-	msg := LevinProtocolMessage{}
-	payload_map := msg.writeHandshakeRequestPayload(node.my_port, node.network_id, node.peer_id)
-	msg.writePayload(payload_map)
-	msg.writeHeader(commandHandshake, uint64(len(msg.payload_bytes)), true)
-	return msg
-}
-
-func (node *Node) CreateHandshakeResponse(peerlist []PeerlistEntry) LevinProtocolMessage {
-	msg := LevinProtocolMessage{}
-	payload_map := msg.writeHandshakeResponsePayload(node.my_port, node.network_id, node.peer_id, peerlist)
-	msg.writePayload(payload_map)
-	msg.writeHeader(commandHandshake, uint64(len(msg.payload_bytes)), false)
-	return msg
-}
-
-func (node *Node) CreateTimedSyncRequest() LevinProtocolMessage {
-	msg := LevinProtocolMessage{}
-	payload_map := msg.writeTimedSyncRequestPayload(node.network_id)
-	msg.writePayload(payload_map)
-	msg.writeHeader(commandTimedSync, uint64(len(msg.payload_bytes)), true)
-	return msg
-}
-
-func (node *Node) CreateTimedSyncResponse(peerlist []PeerlistEntry) LevinProtocolMessage {
-	msg := LevinProtocolMessage{}
-	payload_map := msg.writeTimedSyncResponsePayload(node.my_port, node.network_id, node.peer_id, peerlist)
-	msg.writePayload(payload_map)
-	msg.writeHeader(commandTimedSync, uint64(len(msg.payload_bytes)), false)
-	return msg
-}
-
-func (node *Node) CreatePingRequest() LevinProtocolMessage {
-	msg := LevinProtocolMessage{}
-	msg.writeHeader(commandPingPong, 0, true)
-	// Ping Request msg has no payload
-	return msg
-}
-
-func (node *Node) CreatePongResponse() LevinProtocolMessage {
-	msg := LevinProtocolMessage{}
-	payload_map := msg.writePongResponsePayload(node.peer_id)
-	msg.writePayload(payload_map)
-	msg.writeHeader(commandPingPong, uint64(len(msg.payload_bytes)), false)
-	return msg
-}
-
-func generateRamdomPeerlist(num_of_peer int) []PeerlistEntry {
+func generateRamdomPeerlist(num_of_peer int) []levin.PeerlistEntry {
 	if num_of_peer > 250 {
 		num_of_peer = 250
 	}
-	peerlist := make([]PeerlistEntry, num_of_peer)
+	peerlist := make([]levin.PeerlistEntry, num_of_peer)
 	max := new(big.Int).Lsh(big.NewInt(1), 64)
 	for i := 0; i < num_of_peer; i++ {
 		random_num, _ := rand.Int(rand.Reader, max)
-		peerlist[i].ip = uint32(random_num.Uint64())
+		peerlist[i].IP = uint32(random_num.Uint64())
 		random_num, _ = rand.Int(rand.Reader, max)
-		peerlist[i].port = uint16(random_num.Uint64())
+		peerlist[i].Port = uint16(random_num.Uint64())
 		random_num, _ = rand.Int(rand.Reader, max)
-		peerlist[i].peer_id = random_num.Uint64()
+		peerlist[i].PeerId = random_num.Uint64()
 	}
 	return peerlist
 }
