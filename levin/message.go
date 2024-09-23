@@ -75,15 +75,17 @@ type LevinProtocolMessage struct {
 	payload map[string]interface{}
 }
 
+const CommandHandshake = 1001
+const CommandTimedSync = 1002
+const CommandPingPong = 1003
+
 type PeerlistEntry struct {
 	IP     uint32
 	Port   uint16
 	PeerId uint64
 }
 
-const CommandHandshake = 1001
-const CommandTimedSync = 1002
-const CommandPingPong = 1003
+const MaxPeerlistEntryNum = 250
 
 /*
 ======================================
@@ -93,8 +95,16 @@ const CommandPingPong = 1003
 ======================================
 */
 
-func (msg *LevinProtocolMessage) ReadBuffer(conn *net.Conn) bool {
-	return msg.readHeader(conn) && msg.readPayload(conn)
+func (msg *LevinProtocolMessage) ReadBuffer(conn net.Conn) error {
+	err := msg.readHeader(conn)
+	if err != nil {
+		return err
+	}
+	err = msg.readPayload(conn)
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 func (msg *LevinProtocolMessage) GetCommand() uint32 {

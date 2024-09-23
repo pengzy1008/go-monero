@@ -3,6 +3,8 @@ package levin
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
+	"fmt"
 	"log"
 	"net"
 )
@@ -16,24 +18,24 @@ import (
 */
 
 // 读取消息的头部（包含头部的解析、反序列化）
-func (msg *LevinProtocolMessage) readHeader(conn *net.Conn) bool {
+func (msg *LevinProtocolMessage) readHeader(conn net.Conn) error {
 	msg.header_bytes = make([]byte, levinMessageHeaderLength)
 	// 读取header
-	header_length, err := (*conn).Read(msg.header_bytes)
+	header_length, err := conn.Read(msg.header_bytes)
 	if err != nil {
-		log.Println("Error reading levin message from connection: "+(*conn).RemoteAddr().String(), err)
-		log.Println("Disconnect with connection " + (*conn).RemoteAddr().String())
-		return false
+		log.Println("Error reading levin message from connection: "+conn.RemoteAddr().String(), err)
+		log.Println("Disconnect with connection " + conn.RemoteAddr().String())
+		return err
 	}
 	if header_length < levinMessageHeaderLength {
 		log.Printf("Error levin message header length. Expected length: %d, received data length: %d\n", levinMessageHeaderLength, header_length)
-		return false
+		return fmt.Errorf("error levin message header length, expected length: %d, received data length: %d", levinMessageHeaderLength, header_length)
 	}
 	// 1. 读取前8个字节的signature，判断是不是门罗币网络层协议消息
 	msg.ptr = 0
 	if !bytes.Equal(msg.header_bytes[msg.ptr:msg.ptr+8], levinSignature) {
-		log.Println("Error receiving data from " + (*conn).RemoteAddr().String() + ": not Monero network protocol message.")
-		return false
+		log.Println("Error receiving data from " + conn.RemoteAddr().String() + ": not Monero network protocol message.")
+		return errors.New("Error receiving data from " + conn.RemoteAddr().String() + ": not Monero network protocol message.")
 	}
 	msg.ptr += 8
 	msg.signature = binary.LittleEndian.Uint64(levinSignature)
@@ -61,20 +63,20 @@ func (msg *LevinProtocolMessage) readHeader(conn *net.Conn) bool {
 	// 7. Version参数，uint32类型，固定为1
 	msg.version = binary.LittleEndian.Uint32(msg.header_bytes[msg.ptr : msg.ptr+4])
 	msg.ptr += 4
-	return true
+	return nil
 }
 
 // 读取消息的payload
-func (msg *LevinProtocolMessage) readPayload(conn *net.Conn) bool {
+func (msg *LevinProtocolMessage) readPayload(conn net.Conn) error {
 	// 读取payload
 	// 先读取payload开头的
 	buffer := make([]byte, 2048) // 在这里先设置缓冲区的大小为2048
 	// 对端发送的数据存在两种情况，一种是发送的数据长度比较小，tcp的一个报文就可以传过来，这个时候message_length长度的缓冲区就可以直接拿下
 	// 第二种情况是，传送的数据量较大，即message_length大于单个tcp报文的最大长度，就需要传多次
 	for uint64(len(msg.payload_bytes)) < msg.length {
-		n, err := (*conn).Read(buffer)
+		n, err := conn.Read(buffer)
 		if err != nil {
-			log.Println("Error reading remaining levin message from connection:"+(*conn).RemoteAddr().String(), err)
+			log.Println("Error reading remaining levin message from connection:"+conn.RemoteAddr().String(), err)
 		}
 		msg.payload_bytes = append(msg.payload_bytes, buffer[:n]...)
 	}
@@ -84,22 +86,22 @@ func (msg *LevinProtocolMessage) readPayload(conn *net.Conn) bool {
 	msg.ptr = uint64(0)
 	if !bytes.Equal(msg.payload_bytes[msg.ptr:msg.ptr+4], portableStorageSignature1) {
 		log.Println("Error portable storage signature1!")
-		return false
+		return errors.New("error portable storage signature1")
 	}
 	msg.ptr += 4
 	if !bytes.Equal(msg.payload_bytes[msg.ptr:msg.ptr+4], portableStorageSignature2) {
 		log.Println("Error portable storage signature2!")
-		return false
+		return errors.New("error portable storage signature2")
 	}
 	msg.ptr += 4
 	if msg.payload_bytes[msg.ptr] != portableStorageFormatVer {
 		log.Println("Error portable storage format ver!")
-		return false
+		return errors.New("error portable storage format ver")
 	}
 	msg.ptr += 1
 	// 2. 检查payload真正的数据部分，递归的反序列化
 	msg.payload = msg.readSection()
-	return true
+	return nil
 }
 
 // 获取字符串的长度，这个字符串可能是键名，也可以是数据
